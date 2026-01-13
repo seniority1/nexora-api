@@ -3,41 +3,57 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const SUNO_COOKIE = process.env.SUNO_COOKIE;
+// This will extract the __session part from your long SUNO_COOKIE
+const getAuthToken = () => {
+    const cookie = process.env.SUNO_COOKIE;
+    if (!cookie) return null;
+    const match = cookie.match(/__session=([^;]+)/);
+    return match ? match[1] : null;
+};
 
 app.get('/', (req, res) => res.send('NexOra Music Engine is Live! 🎵'));
 
 app.get('/generate', async (req, res) => {
     const { prompt } = req.query;
+    const token = getAuthToken();
+
     if (!prompt) return res.status(400).json({ error: "Missing prompt" });
+    if (!token) return res.status(500).json({ error: "Cookie not found in Environment Variables" });
 
     try {
-        // 1. Start generation
-        const { data } = await axios.post('https://app.suno.ai/api/external/generate', {
-            topic: prompt,
-            mv: "chirp-v3.5"
+        // New Suno Studio API Endpoint
+        const response = await axios.post('https://studio-api.suno.ai/api/external/generate/', {
+            prompt: prompt,
+            make_instrumental: false,
+            mv: "chirp-v3-5"
         }, {
-            headers: { 'Cookie': SUNO_COOKIE }
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'text/plain;charset=UTF-8',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+            }
         });
 
-        const clipId = data.clips[0].id;
-        
-        // 2. Return the Clip ID to the bot
+        // Suno returns an array of clips
+        const clipId = response.data.clips[0].id;
         res.json({ status: "success", clipId: clipId });
+
     } catch (error) {
-        res.status(500).json({ error: "Suno auth failed. Update your cookie." });
+        console.error("Suno API Error:", error.response ? error.response.data : error.message);
+        res.status(500).json({ error: "Suno rejected the request. Check if cookie is fresh." });
     }
 });
 
-// Endpoint to check if the song is ready
 app.get('/check/:id', async (req, res) => {
+    const token = getAuthToken();
     try {
-        const { data } = await axios.get(`https://app.suno.ai/api/external/clips/?ids=${req.params.id}`, {
-            headers: { 'Cookie': SUNO_COOKIE }
+        const { data } = await axios.get(`https://studio-api.suno.ai/api/external/clips/?ids=${req.params.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
         });
+        // Returns the first clip found
         res.json(data[0]);
     } catch (e) {
-        res.status(500).send("Error checking status");
+        res.status(500).json({ error: "Error checking status" });
     }
 });
 
